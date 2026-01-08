@@ -1,11 +1,3 @@
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
- 
-}
-
-
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
@@ -19,13 +11,4 @@ body {
   height: 100vh;
   overflow: hidden;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-
-}
-
-/* .join-screen-container{
-
-} */
-.call-screen-container{
- /* background-color: #764ba2;  */
-
 }
