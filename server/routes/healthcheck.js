@@ -3,8 +3,8 @@ import { Router } from 'express';
 const router = Router();
 
 /**
- * @route   POST /api/auth/token
- * @desc    Generate ACS token for user
+ * @route   POST /health
+ * @desc    Health check
  * @access  Public
  */
 router.get('/health', (req, res) => {

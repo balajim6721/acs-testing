@@ -94,7 +94,7 @@ export const createRoom = async (userId, displayName, roomName = null) => {
         console.log('   Is UUID?', /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(room.id));
 
         const participant = {
-            communicationIdentifier: {
+            id: {
                 kind: "communicationUser",
                 communicationUserId: userId
             },
@@ -208,7 +208,7 @@ export const joinRoom = async (roomId, userId, displayName) => {
 
         // Create participant object with correct structure
         const participantToAdd = {
-            communicationIdentifier: {
+            id: {
                 kind: "communicationUser",
                 communicationUserId: userId
             },

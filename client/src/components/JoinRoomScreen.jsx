@@ -39,11 +39,7 @@ const JoinRoomScreen = ({ onJoinCall }) => {
 
       // 2. Create room
       toast.info('Creating room...');
-      const roomData = await createRoom(
-        tokenData.userId,
-        displayName,
-        roomName || `${displayName}'s Room`
-      );
+      const roomData = await createRoom(tokenData?.userId, displayName, roomName || `${displayName}'s Room`);
 
       console.log('✅ Room created SUCCESSFULLY');
       console.log('Room ID:', roomData.roomId);
