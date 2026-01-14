@@ -1,9 +1,19 @@
-import React, { useState } from 'react';
-import { Button } from 'primereact/button';
-import { InputText } from 'primereact/inputtext';
-import { Card } from 'primereact/card';
-import { Badge } from 'primereact/badge';
-import { Video, Users, UserPlus, LogIn, Copy, CheckCircle, Loader2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import {
+  Video,
+  Users,
+  UserPlus,
+  LogIn,
+  Copy,
+  CheckCircle,
+  Loader2,
+  Wifi,
+  WifiOff,
+  AlertCircle,
+  Shield,
+  Clock,
+  Globe
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { generateToken, createRoom, joinRoom, validateRoom, healthCheck, getRoomParticipants } from '../services/api';
 
@@ -14,6 +24,49 @@ const JoinRoomScreen = ({ onJoinCall }) => {
   const [roomName, setRoomName] = useState('');
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [apiHealth, setApiHealth] = useState(null);
+  const [validatingRoom, setValidatingRoom] = useState(false);
+  const [roomValid, setRoomValid] = useState(null);
+
+  // Check API health on component mount
+  useEffect(() => {
+    checkApiHealth();
+  }, []);
+
+  // Validate room when roomId changes
+  useEffect(() => {
+    if (roomId.trim() && mode === 'join') {
+      validateRoomId();
+    } else {
+      setRoomValid(null);
+    }
+  }, [roomId, mode]);
+
+  const checkApiHealth = async () => {
+    try {
+      await healthCheck();
+      setApiHealth(true);
+    } catch (error) {
+      setApiHealth(false);
+      toast.error('API connection failed', {
+        description: 'Please check if the backend server is running'
+      });
+    }
+  };
+
+  const validateRoomId = async () => {
+    if (!roomId.trim()) return;
+
+    setValidatingRoom(true);
+    try {
+      const isValid = await validateRoom(roomId);
+      setRoomValid(isValid);
+    } catch (error) {
+      setRoomValid(false);
+    } finally {
+      setValidatingRoom(false);
+    }
+  };
 
   const handleCreateRoom = async () => {
     if (!displayName.trim()) {
@@ -26,36 +79,32 @@ const JoinRoomScreen = ({ onJoinCall }) => {
     setLoading(true);
     try {
       // 1. Generate token
-      toast.info('Generating token...');
+      toast.info('Generating authentication token...');
       const tokenData = await generateToken(displayName);
 
-      if (!tokenData.userId) {
-        throw new Error('User ID not found in token response');
-      }
-
-      if (typeof tokenData.userId !== 'string') {
-        throw new Error(`Invalid user ID type: ${typeof tokenData.userId}`);
+      if (!tokenData.userId || typeof tokenData.userId !== 'string') {
+        throw new Error('Invalid user ID received from authentication service');
       }
 
       // 2. Create room
-      toast.info('Creating room...');
-      const roomData = await createRoom(tokenData?.userId, displayName, roomName || `${displayName}'s Room`);
+      toast.info('Creating new room...');
+      const roomData = await createRoom(
+        tokenData.userId,
+        displayName,
+        roomName || `${displayName}'s Room`
+      );
 
-      console.log('✅ Room created SUCCESSFULLY');
-      console.log('Room ID:', roomData.roomId);
-      console.log('Room ID type:', typeof roomData.roomId);
-      console.log('Full room data:', roomData);
+      console.log('✅ Room created successfully:', roomData.roomId);
 
-      // 3. TEST: Try to get participants immediately
-      console.log('🧪 Testing participants API...');
+      // 3. Test room immediately
       try {
         const participants = await getRoomParticipants(roomData.roomId);
-        console.log('✅ Participants API works:', participants);
+        console.log('✅ Room validation successful:', participants);
       } catch (participantError) {
-        console.error('❌ Participants API failed:', participantError.message);
+        console.warn('⚠️ Room validation warning:', participantError.message);
       }
 
-      // 3. Join call
+      // 4. Join call
       onJoinCall({
         userId: tokenData.userId,
         token: tokenData.token,
@@ -64,10 +113,11 @@ const JoinRoomScreen = ({ onJoinCall }) => {
       });
 
       toast.success('Room created successfully!', {
-        description: `Share the Room ID: ${roomData.roomId}`
+        description: `Room ID: ${roomData.roomId.substring(0, 8)}...`
       });
 
     } catch (error) {
+      console.error('❌ Create room error:', error);
       toast.error('Failed to create room', {
         description: error.response?.data?.error || error.message
       });
@@ -87,54 +137,43 @@ const JoinRoomScreen = ({ onJoinCall }) => {
       return;
     }
 
+    if (roomValid === false) {
+      toast.error('Invalid room ID', {
+        description: 'Please check the room ID and try again'
+      });
+      return;
+    }
+
     setLoading(true);
     try {
-      // 1. Generate token FIRST
-      toast.info('Generating token...');
+      // 1. Generate token
+      toast.info('Generating authentication token...');
       const tokenData = await generateToken(displayName);
 
-      console.log('🔑 Token generated for join:');
-      console.log('Full token data:', tokenData);
-      console.log('UserId from token:', tokenData.userId);
-      console.log('UserId type:', typeof tokenData.userId);
-
-      // Ensure userId is a string
       let userId = tokenData.userId;
       if (userId && typeof userId === 'object') {
-        console.warn('⚠️ userId is object, extracting...');
-        console.log('Object structure:', JSON.stringify(userId, null, 2));
-
         if (userId.communicationUserId) {
           userId = userId.communicationUserId;
         } else if (userId.userId) {
           userId = userId.userId;
-        } else if (userId.user && userId.user.communicationUserId) {
-          userId = userId.user.communicationUserId;
         }
-        console.log('Extracted userId:', userId);
       }
 
       if (!userId || typeof userId !== 'string') {
-        throw new Error('Invalid user ID received from token service');
+        throw new Error('Invalid user ID received from authentication service');
       }
 
       // 2. Validate room exists
       toast.info('Validating room...');
       const isValid = await validateRoom(roomId);
-
       if (!isValid) {
         throw new Error('Room not found. Please check the Room ID.');
       }
 
-      // 3. Join room with validated userId
+      // 3. Join room
       toast.info('Joining room...');
-      console.log('🚪 Calling joinRoom API with:');
-      console.log('Room ID:', roomId);
-      console.log('User ID:', userId);
-      console.log('Display Name:', displayName);
-
       const joinResult = await joinRoom(roomId, userId, displayName);
-      console.log('✅ Join room result:', joinResult);
+      console.log('✅ Successfully joined room:', joinResult);
 
       // 4. Enter call
       onJoinCall({
@@ -144,12 +183,10 @@ const JoinRoomScreen = ({ onJoinCall }) => {
         roomId
       });
 
-      toast.success('Joined room successfully!');
+      toast.success('Successfully joined the room!');
 
     } catch (error) {
-      console.error('❌ Join room error details:');
-      console.error('Error:', error);
-      console.error('Error response:', error.response?.data);
+      console.error('❌ Join room error:', error);
 
       let errorMessage = error.response?.data?.error || error.message;
 
@@ -177,194 +214,307 @@ const JoinRoomScreen = ({ onJoinCall }) => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleHealthCheck = async () => {
-    try {
-      await healthCheck();
-      toast.success('API is healthy');
-    } catch (error) {
-      toast.error('API is unhealthy');
-      return false;
-    }
+  const getRoomValidationIcon = () => {
+    if (validatingRoom) return <Loader2 className="h-4 w-4 animate-spin text-blue-500" />;
+    if (roomValid === true) return <CheckCircle className="h-4 w-4 text-green-500" />;
+    if (roomValid === false) return <AlertCircle className="h-4 w-4 text-red-500" />;
+    return null;
   };
 
   return (
-    <div className="max-w-4xl mx-auto">
-      <Card className="shadow-2xl border-0">
-        <div className="text-center mb-10">
-          <div className="inline-flex items-center justify-center w-20 h-20 bg-primary-100 rounded-full mb-4">
-            <Video className="h-10 w-10 text-primary-600" />
+    <div className="max-w-6xl mx-auto">
+      {/* API Health Status */}
+      <div className="mb-6 flex items-center justify-center">
+        <div className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm ${apiHealth === true
+            ? 'bg-green-100 text-green-800 border border-green-200'
+            : apiHealth === false
+              ? 'bg-red-100 text-red-800 border border-red-200'
+              : 'bg-yellow-100 text-yellow-800 border border-yellow-200'
+          }`}>
+          {apiHealth === true ? (
+            <>
+              <Wifi className="h-4 w-4" />
+              <span>API Connected</span>
+            </>
+          ) : apiHealth === false ? (
+            <>
+              <WifiOff className="h-4 w-4" />
+              <span>API Disconnected</span>
+            </>
+          ) : (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>Checking API...</span>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="bg-white rounded-3xl shadow-2xl border border-slate-200/50 overflow-hidden">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-blue-600 via-purple-600 to-blue-800 p-8 text-white">
+          <div className="text-center">
+            <div className="inline-flex items-center justify-center w-20 h-20 bg-white/20 backdrop-blur-sm rounded-2xl mb-6">
+              <Video className="h-10 w-10" />
+            </div>
+            <h1 className="text-4xl font-bold mb-3">
+              Join Video Conference
+            </h1>
+            <p className="text-blue-100 text-lg">
+              Connect with others using Azure Communication Services
+            </p>
           </div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            Start or Join a Video Call
-          </h1>
-          <p className="text-gray-600">
-            Connect with others using Azure Communication Services
-          </p>
         </div>
 
-        <div className="grid md:grid-cols-2 gap-8">
-          {/* Left Column - Inputs */}
-          <div className="space-y-6">
-            {/* Display Name */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                <UserPlus className="inline h-4 w-4 mr-2" />
-                Your Display Name
-              </label>
-              <InputText
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="Enter your name"
-                className="w-full p-3"
-                disabled={loading}
-              />
-            </div>
-
-            {/* Mode Toggle */}
-            <div className="bg-gray-50 p-4 rounded-lg">
-              <div className="flex space-x-4 mb-4">
-                <button
-                  onClick={() => setMode('join')}
-                  className={`flex-1 py-3 px-4 rounded-lg text-center transition-all ${mode === 'join'
-                    ? 'bg-primary-600 text-white shadow-md'
-                    : 'bg-white text-gray-700 hover:bg-gray-100'
-                    }`}
-                >
-                  <LogIn className="inline h-4 w-4 mr-2" />
-                  Join Existing Room
-                </button>
-                <button
-                  onClick={() => setMode('create')}
-                  className={`flex-1 py-3 px-4 rounded-lg text-center transition-all ${mode === 'create'
-                    ? 'bg-primary-600 text-white shadow-md'
-                    : 'bg-white text-gray-700 hover:bg-gray-100'
-                    }`}
-                >
-                  <Video className="inline h-4 w-4 mr-2" />
-                  Create New Room
-                </button>
+        <div className="p-8">
+          <div className="grid lg:grid-cols-2 gap-12">
+            {/* Left Column - Form */}
+            <div className="space-y-8">
+              {/* Display Name */}
+              <div className="space-y-3">
+                <label className="block text-sm font-semibold text-slate-700">
+                  <UserPlus className="inline h-4 w-4 mr-2" />
+                  Your Display Name
+                </label>
+                <input
+                  type="text"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder="Enter your name"
+                  className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-lg"
+                  disabled={loading}
+                />
               </div>
 
-              {mode === 'create' && (
-                <div className="animate-fadeIn">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Room Name (Optional)
-                  </label>
-                  <InputText
-                    value={roomName}
-                    onChange={(e) => setRoomName(e.target.value)}
-                    placeholder="e.g., Team Meeting"
-                    className="w-full p-3"
-                    disabled={loading}
-                  />
+              {/* Mode Selection */}
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setMode('join')}
+                    className={`p-4 rounded-xl text-center transition-all duration-200 border-2 ${mode === 'join'
+                        ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-md'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                      }`}
+                  >
+                    <LogIn className="h-6 w-6 mx-auto mb-2" />
+                    <div className="font-semibold">Join Room</div>
+                    <div className="text-sm opacity-75">Enter existing room</div>
+                  </button>
+                  <button
+                    onClick={() => setMode('create')}
+                    className={`p-4 rounded-xl text-center transition-all duration-200 border-2 ${mode === 'create'
+                        ? 'bg-purple-50 border-purple-500 text-purple-700 shadow-md'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                      }`}
+                  >
+                    <Video className="h-6 w-6 mx-auto mb-2" />
+                    <div className="font-semibold">Create Room</div>
+                    <div className="text-sm opacity-75">Start new meeting</div>
+                  </button>
                 </div>
-              )}
 
-              {mode === 'join' && (
-                <div className="animate-fadeIn">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Room ID
-                  </label>
-                  <div className="flex space-x-2">
-                    <InputText
-                      value={roomId}
-                      onChange={(e) => setRoomId(e.target.value)}
-                      placeholder="Enter room ID"
-                      className="flex-1 p-3"
+                {/* Mode-specific inputs */}
+                {mode === 'create' && (
+                  <div className="space-y-3 animate-in slide-in-from-top-2 duration-300">
+                    <label className="block text-sm font-semibold text-slate-700">
+                      Room Name (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={roomName}
+                      onChange={(e) => setRoomName(e.target.value)}
+                      placeholder="e.g., Team Meeting, Daily Standup"
+                      className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200"
                       disabled={loading}
                     />
-                    <Button
-                      icon={copied ? <CheckCircle /> : <Copy />}
-                      className="p-3"
-                      onClick={copyRoomId}
-                      disabled={!roomId}
-                      severity="secondary"
-                    />
+                  </div>
+                )}
+
+                {mode === 'join' && (
+                  <div className="space-y-3 animate-in slide-in-from-top-2 duration-300">
+                    <label className="block text-sm font-semibold text-slate-700">
+                      Room ID
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={roomId}
+                        onChange={(e) => setRoomId(e.target.value)}
+                        placeholder="Enter room ID"
+                        className={`w-full px-4 py-3 pr-12 border rounded-xl focus:ring-2 focus:border-transparent transition-all duration-200 ${roomValid === false
+                            ? 'border-red-300 focus:ring-red-500'
+                            : roomValid === true
+                              ? 'border-green-300 focus:ring-green-500'
+                              : 'border-slate-300 focus:ring-blue-500'
+                          }`}
+                        disabled={loading}
+                      />
+                      <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                        {getRoomValidationIcon()}
+                      </div>
+                    </div>
+                    {roomValid === false && (
+                      <p className="text-sm text-red-600 flex items-center gap-1">
+                        <AlertCircle className="h-4 w-4" />
+                        Room not found or invalid
+                      </p>
+                    )}
+                    {roomValid === true && (
+                      <p className="text-sm text-green-600 flex items-center gap-1">
+                        <CheckCircle className="h-4 w-4" />
+                        Room found and available
+                      </p>
+                    )}
+                    {roomId && (
+                      <button
+                        onClick={copyRoomId}
+                        className="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-800 transition-colors"
+                      >
+                        {copied ? <CheckCircle className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                        {copied ? 'Copied!' : 'Copy Room ID'}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Action Button */}
+              <button
+                onClick={mode === 'create' ? handleCreateRoom : handleJoinRoom}
+                disabled={
+                  loading ||
+                  !displayName.trim() ||
+                  (mode === 'join' && (!roomId.trim() || roomValid === false)) ||
+                  apiHealth === false
+                }
+                className={`w-full py-4 px-6 rounded-xl font-semibold text-lg transition-all duration-200 flex items-center justify-center gap-3 ${mode === 'create'
+                    ? 'bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white shadow-lg hover:shadow-xl disabled:from-slate-400 disabled:to-slate-500'
+                    : 'bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white shadow-lg hover:shadow-xl disabled:from-slate-400 disabled:to-slate-500'
+                  } disabled:cursor-not-allowed disabled:shadow-none`}
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    {mode === 'create' ? 'Creating Room...' : 'Joining Room...'}
+                  </>
+                ) : (
+                  <>
+                    {mode === 'create' ? <Video className="h-5 w-5" /> : <LogIn className="h-5 w-5" />}
+                    {mode === 'create' ? 'Create & Join Room' : 'Join Room'}
+                  </>
+                )}
+              </button>
+
+              {/* API Health Check Button */}
+              <button
+                onClick={checkApiHealth}
+                className="w-full py-3 px-4 border border-slate-300 rounded-xl text-slate-700 hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"
+              >
+                <Shield className="h-4 w-4" />
+                Test API Connection
+              </button>
+            </div>
+
+            {/* Right Column - Instructions */}
+            <div className="space-y-8">
+              {/* How it works */}
+              <div className="bg-gradient-to-br from-slate-50 to-slate-100 p-6 rounded-2xl border border-slate-200">
+                <h3 className="text-xl font-bold text-slate-800 mb-6 flex items-center">
+                  <Users className="h-6 w-6 mr-3 text-blue-600" />
+                  How it works
+                </h3>
+
+                <div className="space-y-6">
+                  <div className="flex items-start gap-4">
+                    <div className="w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center text-sm font-bold">
+                      1
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-slate-800 mb-1">Enter your name</h4>
+                      <p className="text-sm text-slate-600">This is how others will see you in the call</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-4">
+                    <div className="w-8 h-8 bg-purple-600 text-white rounded-full flex items-center justify-center text-sm font-bold">
+                      2
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-slate-800 mb-1">
+                        {mode === 'create' ? 'Create a new room' : 'Join with Room ID'}
+                      </h4>
+                      <p className="text-sm text-slate-600">
+                        {mode === 'create'
+                          ? 'Start a new video call room and share the ID with others'
+                          : 'Enter the Room ID provided by the meeting organizer'
+                        }
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-4">
+                    <div className="w-8 h-8 bg-green-600 text-white rounded-full flex items-center justify-center text-sm font-bold">
+                      3
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-slate-800 mb-1">Join the call</h4>
+                      <p className="text-sm text-slate-600">
+                        Grant camera & microphone permissions when prompted
+                      </p>
+                    </div>
                   </div>
                 </div>
-              )}
-            </div>
+              </div>
 
-            {/* Action Button */}
-            <Button
-              label={
-                loading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    {mode === 'create' ? 'Creating...' : 'Joining...'}
-                  </>
-                ) : mode === 'create' ? (
-                  'Create Room & Join'
-                ) : (
-                  'Join Room'
-                )
-              }
-              onClick={mode === 'create' ? handleCreateRoom : handleJoinRoom}
-              className="w-full py-3 text-lg"
-              disabled={loading || !displayName.trim() || (mode === 'join' && !roomId.trim())}
-              icon={mode === 'create' ? <Video /> : <LogIn />}
-            />
-            <Button
-              label={"Health Check"}
-              onClick={handleHealthCheck}
-              className="w-full py-3 text-lg mt-4!"
-            />
-          </div>
+              {/* Features */}
+              <div className="bg-gradient-to-br from-blue-50 to-purple-50 p-6 rounded-2xl border border-blue-200">
+                <h3 className="text-xl font-bold text-slate-800 mb-6 flex items-center">
+                  <Shield className="h-6 w-6 mr-3 text-purple-600" />
+                  Features
+                </h3>
 
-          {/* Right Column - Instructions */}
-          <div className="bg-primary-50 p-6 rounded-xl border border-primary-100">
-            <h3 className="text-lg font-semibold text-primary-800 mb-4 flex items-center">
-              <Users className="h-5 w-5 mr-2" />
-              How it works
-            </h3>
-
-            <div className="space-y-4">
-              <div className="flex items-start">
-                <Badge value="1" className="mr-3 mt-1" />
-                <div>
-                  <h4 className="font-medium text-gray-900">Enter your name</h4>
-                  <p className="text-sm text-gray-600">This is how others will see you in the call</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="flex items-center gap-2 text-sm text-slate-700">
+                    <Video className="h-4 w-4 text-blue-600" />
+                    HD Video
+                  </div>
+                  <div className="flex items-center gap-2 text-sm text-slate-700">
+                    <Users className="h-4 w-4 text-green-600" />
+                    Multi-user
+                  </div>
+                  <div className="flex items-center gap-2 text-sm text-slate-700">
+                    <Globe className="h-4 w-4 text-purple-600" />
+                    Screen Share
+                  </div>
+                  <div className="flex items-center gap-2 text-sm text-slate-700">
+                    <Clock className="h-4 w-4 text-orange-600" />
+                    Real-time
+                  </div>
                 </div>
               </div>
 
-              <div className="flex items-start">
-                <Badge value="2" className="mr-3 mt-1" />
-                <div>
-                  <h4 className="font-medium text-gray-900">
-                    {mode === 'create' ? 'Create a new room' : 'Join with Room ID'}
-                  </h4>
-                  <p className="text-sm text-gray-600">
-                    {mode === 'create'
-                      ? 'Start a new video call room and share the ID with others'
-                      : 'Enter the Room ID provided by the meeting organizer'
-                    }
-                  </p>
-                </div>
+              {/* Testing Instructions */}
+              <div className="bg-gradient-to-br from-yellow-50 to-orange-50 p-6 rounded-2xl border border-yellow-200">
+                <h4 className="font-semibold text-slate-800 mb-3">Testing with multiple users</h4>
+                <ul className="text-sm text-slate-600 space-y-2">
+                  <li className="flex items-start gap-2">
+                    <div className="w-1.5 h-1.5 bg-yellow-500 rounded-full mt-2"></div>
+                    Open this page in different browsers or devices
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <div className="w-1.5 h-1.5 bg-yellow-500 rounded-full mt-2"></div>
+                    Use the same Room ID to join the same call
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <div className="w-1.5 h-1.5 bg-yellow-500 rounded-full mt-2"></div>
+                    Test audio, video, and screen sharing features
+                  </li>
+                </ul>
               </div>
-
-              <div className="flex items-start">
-                <Badge value="3" className="mr-3 mt-1" />
-                <div>
-                  <h4 className="font-medium text-gray-900">Join the call</h4>
-                  <p className="text-sm text-gray-600">
-                    Grant camera & microphone permissions when prompted
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-8 pt-6 border-t border-primary-200">
-              <h4 className="font-medium text-primary-800 mb-2">Testing with multiple users</h4>
-              <ul className="text-sm text-gray-600 space-y-1">
-                <li>• Open this page in different browsers</li>
-                <li>• Use the same Room ID to join</li>
-                <li>• Test audio/video from each device</li>
-                <li>• Verify screen sharing works</li>
-              </ul>
             </div>
           </div>
         </div>
-      </Card>
+      </div>
     </div>
   );
 };
